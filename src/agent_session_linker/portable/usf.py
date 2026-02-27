@@ -26,7 +26,6 @@ import hashlib
 import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any
 from uuid import uuid4
 
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -62,7 +61,7 @@ class USFMessage:
     role: str
     content: str
     timestamp: datetime
-    metadata: dict[str, Any]
+    metadata: dict[str, object]
 
     def __post_init__(self) -> None:
         valid_roles = {"user", "assistant", "system", "tool"}
@@ -140,7 +139,7 @@ class USFTaskState:
 # ---------------------------------------------------------------------------
 
 
-def _message_to_dict(msg: USFMessage) -> dict[str, Any]:
+def _message_to_dict(msg: USFMessage) -> dict[str, object]:
     return {
         "role": msg.role,
         "content": msg.content,
@@ -149,7 +148,7 @@ def _message_to_dict(msg: USFMessage) -> dict[str, Any]:
     }
 
 
-def _message_from_dict(data: dict[str, Any]) -> USFMessage:
+def _message_from_dict(data: dict[str, object]) -> USFMessage:
     ts_raw = data["timestamp"]
     if isinstance(ts_raw, datetime):
         timestamp = ts_raw
@@ -165,7 +164,7 @@ def _message_from_dict(data: dict[str, Any]) -> USFMessage:
     )
 
 
-def _entity_to_dict(entity: USFEntity) -> dict[str, Any]:
+def _entity_to_dict(entity: USFEntity) -> dict[str, object]:
     return {
         "name": entity.name,
         "entity_type": entity.entity_type,
@@ -174,7 +173,7 @@ def _entity_to_dict(entity: USFEntity) -> dict[str, Any]:
     }
 
 
-def _entity_from_dict(data: dict[str, Any]) -> USFEntity:
+def _entity_from_dict(data: dict[str, object]) -> USFEntity:
     return USFEntity(
         name=data["name"],
         entity_type=data["entity_type"],
@@ -183,7 +182,7 @@ def _entity_from_dict(data: dict[str, Any]) -> USFEntity:
     )
 
 
-def _task_state_to_dict(task: USFTaskState) -> dict[str, Any]:
+def _task_state_to_dict(task: USFTaskState) -> dict[str, object]:
     return {
         "task_id": task.task_id,
         "status": task.status,
@@ -192,7 +191,7 @@ def _task_state_to_dict(task: USFTaskState) -> dict[str, Any]:
     }
 
 
-def _task_state_from_dict(data: dict[str, Any]) -> USFTaskState:
+def _task_state_from_dict(data: dict[str, object]) -> USFTaskState:
     return USFTaskState(
         task_id=data["task_id"],
         status=data["status"],
@@ -249,10 +248,10 @@ class UniversalSession(BaseModel):
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     framework_source: str = Field(default="")
     messages: list[USFMessage] = Field(default_factory=list)
-    working_memory: dict[str, Any] = Field(default_factory=dict)
+    working_memory: dict[str, object] = Field(default_factory=dict)
     entities: list[USFEntity] = Field(default_factory=list)
     task_state: list[USFTaskState] = Field(default_factory=list)
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, object] = Field(default_factory=dict)
     checksum: str = Field(default="")
 
     # ------------------------------------------------------------------
@@ -277,7 +276,7 @@ class UniversalSession(BaseModel):
     # Checksum
     # ------------------------------------------------------------------
 
-    def _canonical_dict(self) -> dict[str, Any]:
+    def _canonical_dict(self) -> dict[str, object]:
         """Return a stable, JSON-serialisable dict for checksum computation.
 
         The ``checksum`` field is excluded to avoid circularity.
@@ -342,7 +341,7 @@ class UniversalSession(BaseModel):
             A valid JSON string representing the full session.
         """
         self.compute_checksum()
-        payload: dict[str, Any] = self._canonical_dict()
+        payload: dict[str, object] = self._canonical_dict()
         payload["checksum"] = self.checksum
         return json.dumps(payload, sort_keys=True, default=str)
 
@@ -366,7 +365,7 @@ class UniversalSession(BaseModel):
             If ``json_str`` is not valid JSON or is missing required fields.
         """
         try:
-            data: dict[str, Any] = json.loads(json_str)
+            data: dict[str, object] = json.loads(json_str)
         except json.JSONDecodeError as exc:
             raise ValueError(f"Invalid JSON: {exc}") from exc
 

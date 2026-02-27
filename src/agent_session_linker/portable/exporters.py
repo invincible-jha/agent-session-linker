@@ -20,7 +20,7 @@ OpenAIExporter
 """
 from __future__ import annotations
 
-from typing import Any, Protocol
+from typing import Protocol
 
 from agent_session_linker.portable.usf import UniversalSession, USFMessage, USFTaskState
 
@@ -37,7 +37,7 @@ class SessionExporter(Protocol):
     ``dict`` that is ready to be consumed by the target framework.
     """
 
-    def export(self, session: UniversalSession) -> dict[str, Any]:
+    def export(self, session: UniversalSession) -> dict[str, object]:
         """Convert *session* to the target framework's native dict format.
 
         Parameters
@@ -47,7 +47,7 @@ class SessionExporter(Protocol):
 
         Returns
         -------
-        dict[str, Any]
+        dict[str, object]
             Framework-native representation of the session.
         """
         ...  # pragma: no cover
@@ -100,7 +100,7 @@ class LangChainExporter:
     ``memory_variables`` is populated from ``session.working_memory``.
     """
 
-    def export(self, session: UniversalSession) -> dict[str, Any]:
+    def export(self, session: UniversalSession) -> dict[str, object]:
         """Convert *session* to LangChain memory format.
 
         Parameters
@@ -110,10 +110,10 @@ class LangChainExporter:
 
         Returns
         -------
-        dict[str, Any]
+        dict[str, object]
             LangChain-compatible memory dict.
         """
-        messages: list[dict[str, Any]] = [
+        messages: list[dict[str, object]] = [
             self._convert_message(msg) for msg in session.messages
         ]
         return {
@@ -121,7 +121,7 @@ class LangChainExporter:
             "memory_variables": dict(session.working_memory),
         }
 
-    def _convert_message(self, msg: USFMessage) -> dict[str, Any]:
+    def _convert_message(self, msg: USFMessage) -> dict[str, object]:
         return {
             "type": _usf_role_to_langchain_type(msg.role),
             "content": msg.content,
@@ -159,7 +159,7 @@ class CrewAIExporter:
         }
     """
 
-    def export(self, session: UniversalSession) -> dict[str, Any]:
+    def export(self, session: UniversalSession) -> dict[str, object]:
         """Convert *session* to CrewAI context format.
 
         Parameters
@@ -169,10 +169,10 @@ class CrewAIExporter:
 
         Returns
         -------
-        dict[str, Any]
+        dict[str, object]
             CrewAI-compatible context dict.
         """
-        context: dict[str, Any] = {
+        context: dict[str, object] = {
             "session_id": session.session_id,
             "framework_source": session.framework_source,
             "messages": [self._convert_message(msg) for msg in session.messages],
@@ -187,7 +187,7 @@ class CrewAIExporter:
                 for entity in session.entities
             ],
         }
-        task_results: list[dict[str, Any]] = [
+        task_results: list[dict[str, object]] = [
             self._convert_task(task) for task in session.task_state
         ]
         return {
@@ -195,7 +195,7 @@ class CrewAIExporter:
             "task_results": task_results,
         }
 
-    def _convert_message(self, msg: USFMessage) -> dict[str, Any]:
+    def _convert_message(self, msg: USFMessage) -> dict[str, object]:
         return {
             "role": msg.role,
             "content": msg.content,
@@ -203,7 +203,7 @@ class CrewAIExporter:
             "metadata": dict(msg.metadata),
         }
 
-    def _convert_task(self, task: USFTaskState) -> dict[str, Any]:
+    def _convert_task(self, task: USFTaskState) -> dict[str, object]:
         return {
             "task_id": task.task_id,
             "status": task.status,
@@ -237,7 +237,7 @@ class OpenAIExporter:
     Assistants API accepts them in message-level metadata when needed.
     """
 
-    def export(self, session: UniversalSession) -> dict[str, Any]:
+    def export(self, session: UniversalSession) -> dict[str, object]:
         """Convert *session* to OpenAI thread format.
 
         Parameters
@@ -247,10 +247,10 @@ class OpenAIExporter:
 
         Returns
         -------
-        dict[str, Any]
+        dict[str, object]
             OpenAI-compatible thread dict.
         """
-        messages: list[dict[str, Any]] = [
+        messages: list[dict[str, object]] = [
             self._convert_message(msg) for msg in session.messages
         ]
         return {
@@ -258,7 +258,7 @@ class OpenAIExporter:
             "messages": messages,
         }
 
-    def _convert_message(self, msg: USFMessage) -> dict[str, Any]:
+    def _convert_message(self, msg: USFMessage) -> dict[str, object]:
         return {
             "role": msg.role,
             "content": msg.content,

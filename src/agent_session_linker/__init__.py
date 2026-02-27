@@ -75,7 +75,10 @@ from agent_session_linker.portable.importers import (
 
 __version__: str = "0.1.0"
 
+from agent_session_linker.convenience import Session
+
 __all__ = [
+    "Session",
     "__version__",
     # Session core
     "ContextSegment",

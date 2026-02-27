@@ -17,7 +17,7 @@ OpenAIImporter
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any, Protocol
+from typing import Protocol
 from uuid import uuid4
 
 from agent_session_linker.portable.usf import (
@@ -41,7 +41,7 @@ class SessionImporter(Protocol):
     format and return a validated :class:`UniversalSession`.
     """
 
-    def import_session(self, data: dict[str, Any]) -> UniversalSession:
+    def import_session(self, data: dict[str, object]) -> UniversalSession:
         """Convert framework-native *data* to a :class:`UniversalSession`.
 
         Parameters
@@ -71,7 +71,7 @@ def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _parse_timestamp(value: Any) -> datetime:
+def _parse_timestamp(value: object) -> datetime:
     """Parse *value* into a timezone-aware UTC datetime.
 
     Parameters
@@ -145,7 +145,7 @@ class LangChainImporter:
     ``"additional_kwargs"`` dict that becomes the message metadata.
     """
 
-    def import_session(self, data: dict[str, Any]) -> UniversalSession:
+    def import_session(self, data: dict[str, object]) -> UniversalSession:
         """Convert a LangChain memory dict to a :class:`UniversalSession`.
 
         Parameters
@@ -163,7 +163,7 @@ class LangChainImporter:
         ValueError
             If a message entry is missing required fields.
         """
-        raw_messages: list[Any] = data.get("messages") or []
+        raw_messages: list[object] = data.get("messages") or []
         messages: list[USFMessage] = []
         for entry in raw_messages:
             if not isinstance(entry, dict):
@@ -171,7 +171,7 @@ class LangChainImporter:
             msg_type = entry.get("type") or "human"
             content = entry.get("content", "")
             timestamp = _parse_timestamp(entry.get("timestamp"))
-            metadata: dict[str, Any] = dict(entry.get("additional_kwargs") or {})
+            metadata: dict[str, object] = dict(entry.get("additional_kwargs") or {})
             messages.append(
                 USFMessage(
                     role=_langchain_type_to_usf_role(msg_type),
@@ -181,7 +181,7 @@ class LangChainImporter:
                 )
             )
 
-        working_memory: dict[str, Any] = dict(data.get("memory_variables") or {})
+        working_memory: dict[str, object] = dict(data.get("memory_variables") or {})
 
         return UniversalSession(
             version=USFVersion,
@@ -229,7 +229,7 @@ class CrewAIImporter:
     Every sub-list is optional and defaults to empty.
     """
 
-    def import_session(self, data: dict[str, Any]) -> UniversalSession:
+    def import_session(self, data: dict[str, object]) -> UniversalSession:
         """Convert a CrewAI context dict to a :class:`UniversalSession`.
 
         Parameters
@@ -247,12 +247,12 @@ class CrewAIImporter:
         ValueError
             If nested structures contain invalid values.
         """
-        context: dict[str, Any] = dict(data.get("context") or {})
-        task_results: list[Any] = data.get("task_results") or []
+        context: dict[str, object] = dict(data.get("context") or {})
+        task_results: list[object] = data.get("task_results") or []
 
         session_id: str = str(context.get("session_id") or uuid4())
 
-        raw_messages: list[Any] = context.get("messages") or []
+        raw_messages: list[object] = context.get("messages") or []
         messages: list[USFMessage] = []
         for entry in raw_messages:
             if not isinstance(entry, dict):
@@ -271,9 +271,9 @@ class CrewAIImporter:
                 )
             )
 
-        working_memory: dict[str, Any] = dict(context.get("working_memory") or {})
+        working_memory: dict[str, object] = dict(context.get("working_memory") or {})
 
-        raw_entities: list[Any] = context.get("entities") or []
+        raw_entities: list[object] = context.get("entities") or []
         entities: list[USFEntity] = []
         for entry in raw_entities:
             if not isinstance(entry, dict):
@@ -341,7 +341,7 @@ class OpenAIImporter:
     (integer) or an ISO-8601 string, and a ``"metadata"`` dict.
     """
 
-    def import_session(self, data: dict[str, Any]) -> UniversalSession:
+    def import_session(self, data: dict[str, object]) -> UniversalSession:
         """Convert an OpenAI thread dict to a :class:`UniversalSession`.
 
         Parameters
@@ -360,7 +360,7 @@ class OpenAIImporter:
             If a message entry is missing required fields.
         """
         thread_id: str = str(data.get("thread_id") or uuid4())
-        raw_messages: list[Any] = data.get("messages") or []
+        raw_messages: list[object] = data.get("messages") or []
 
         messages: list[USFMessage] = []
         for entry in raw_messages:
@@ -376,7 +376,7 @@ class OpenAIImporter:
             else:
                 timestamp = _parse_timestamp(raw_ts)
 
-            metadata: dict[str, Any] = dict(entry.get("metadata") or {})
+            metadata: dict[str, object] = dict(entry.get("metadata") or {})
             messages.append(
                 USFMessage(
                     role=role,
