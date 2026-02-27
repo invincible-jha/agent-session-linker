@@ -1,0 +1,32 @@
+version: "3.9"
+
+services:
+  agent-session-linker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: aumos/agent-session-linker:latest
+    container_name: agent-session-linker
+    ports:
+      - "8083:8083"
+    environment:
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - session-data:/app/data
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8083/health')",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+volumes:
+  session-data:
+    driver: local
