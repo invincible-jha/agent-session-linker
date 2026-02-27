@@ -52,6 +52,27 @@ from agent_session_linker.middleware.checkpoint import CheckpointManager, Checkp
 from agent_session_linker.linking.session_linker import LinkedSession, SessionLinker
 from agent_session_linker.linking.chain import SessionChain
 
+# Portable / Universal Session Format
+from agent_session_linker.portable.usf import (
+    USFVersion,
+    USFMessage,
+    USFEntity,
+    USFTaskState,
+    UniversalSession,
+)
+from agent_session_linker.portable.exporters import (
+    SessionExporter,
+    LangChainExporter,
+    CrewAIExporter,
+    OpenAIExporter,
+)
+from agent_session_linker.portable.importers import (
+    SessionImporter,
+    LangChainImporter,
+    CrewAIImporter,
+    OpenAIImporter,
+)
+
 __version__: str = "0.1.0"
 
 __all__ = [
@@ -94,4 +115,18 @@ __all__ = [
     "LinkedSession",
     "SessionChain",
     "SessionLinker",
+    # Portable / USF
+    "USFVersion",
+    "USFMessage",
+    "USFEntity",
+    "USFTaskState",
+    "UniversalSession",
+    "SessionExporter",
+    "LangChainExporter",
+    "CrewAIExporter",
+    "OpenAIExporter",
+    "SessionImporter",
+    "LangChainImporter",
+    "CrewAIImporter",
+    "OpenAIImporter",
 ]

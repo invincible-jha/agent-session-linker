@@ -529,6 +529,246 @@ def session_checkpoint(
 
 
 # ---------------------------------------------------------------------------
+# portable command group
+# ---------------------------------------------------------------------------
+
+
+@cli.group(name="portable")
+def portable_group() -> None:
+    """Cross-framework session portability commands (USF).
+
+    Export, import, or convert sessions between LangChain, CrewAI, and OpenAI
+    formats using the Universal Session Format as the interchange layer.
+    """
+
+
+@portable_group.command(name="export")
+@click.option(
+    "--format",
+    "fmt",
+    required=True,
+    type=click.Choice(["langchain", "crewai", "openai"], case_sensitive=False),
+    help="Target framework format.",
+)
+@click.option(
+    "--input",
+    "input_file",
+    required=True,
+    type=click.Path(exists=True, dir_okay=False),
+    help="Path to a USF session JSON file.",
+)
+@click.option(
+    "--output",
+    "output_file",
+    required=True,
+    type=click.Path(dir_okay=False),
+    help="Path to write the exported JSON file.",
+)
+def portable_export(fmt: str, input_file: str, output_file: str) -> None:
+    """Export a USF session file to a framework-native JSON format.
+
+    Reads a UniversalSession from INPUT and writes the framework-specific
+    representation to OUTPUT.
+
+    Examples::
+
+        agent-session-linker portable export --format langchain \\
+            --input session.usf.json --output lc_session.json
+
+        agent-session-linker portable export --format openai \\
+            --input session.usf.json --output openai_thread.json
+    """
+    import json
+    from pathlib import Path
+    from agent_session_linker.portable.usf import UniversalSession
+    from agent_session_linker.portable.exporters import (
+        LangChainExporter,
+        CrewAIExporter,
+        OpenAIExporter,
+    )
+
+    try:
+        json_str = Path(input_file).read_text(encoding="utf-8")
+        session = UniversalSession.from_json(json_str)
+    except (ValueError, OSError) as exc:
+        console.print(f"[red]Failed to load session:[/red] {exc}")
+        sys.exit(1)
+
+    exporter_map = {
+        "langchain": LangChainExporter(),
+        "crewai": CrewAIExporter(),
+        "openai": OpenAIExporter(),
+    }
+    exporter = exporter_map[fmt.lower()]
+    result = exporter.export(session)
+
+    output_path = Path(output_file)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(json.dumps(result, indent=2, default=str), encoding="utf-8")
+    console.print(f"[green]Exported ({fmt}):[/green] {output_file}")
+
+
+@portable_group.command(name="import")
+@click.option(
+    "--format",
+    "fmt",
+    required=True,
+    type=click.Choice(["langchain", "crewai", "openai"], case_sensitive=False),
+    help="Source framework format.",
+)
+@click.option(
+    "--input",
+    "input_file",
+    required=True,
+    type=click.Path(exists=True, dir_okay=False),
+    help="Path to the framework-native JSON file.",
+)
+@click.option(
+    "--output",
+    "output_file",
+    required=True,
+    type=click.Path(dir_okay=False),
+    help="Path to write the USF session JSON file.",
+)
+def portable_import(fmt: str, input_file: str, output_file: str) -> None:
+    """Import a framework-native JSON file as a USF session.
+
+    Reads the framework-specific representation from INPUT and writes a
+    UniversalSession to OUTPUT.
+
+    Examples::
+
+        agent-session-linker portable import --format langchain \\
+            --input lc_memory.json --output session.usf.json
+
+        agent-session-linker portable import --format crewai \\
+            --input crewai_ctx.json --output session.usf.json
+    """
+    import json as _json
+    from pathlib import Path
+    from agent_session_linker.portable.importers import (
+        LangChainImporter,
+        CrewAIImporter,
+        OpenAIImporter,
+    )
+
+    try:
+        raw_text = Path(input_file).read_text(encoding="utf-8")
+        data: dict[str, object] = _json.loads(raw_text)
+    except (ValueError, OSError) as exc:
+        console.print(f"[red]Failed to read input:[/red] {exc}")
+        sys.exit(1)
+
+    importer_map = {
+        "langchain": LangChainImporter(),
+        "crewai": CrewAIImporter(),
+        "openai": OpenAIImporter(),
+    }
+    importer = importer_map[fmt.lower()]
+
+    try:
+        session = importer.import_session(data)  # type: ignore[arg-type]
+    except (ValueError, KeyError) as exc:
+        console.print(f"[red]Import failed:[/red] {exc}")
+        sys.exit(1)
+
+    output_path = Path(output_file)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(session.to_json(), encoding="utf-8")
+    console.print(f"[green]Imported ({fmt}):[/green] {output_file}")
+
+
+@portable_group.command(name="convert")
+@click.option(
+    "--from",
+    "from_fmt",
+    required=True,
+    type=click.Choice(["langchain", "crewai", "openai"], case_sensitive=False),
+    help="Source framework format.",
+)
+@click.option(
+    "--to",
+    "to_fmt",
+    required=True,
+    type=click.Choice(["langchain", "crewai", "openai"], case_sensitive=False),
+    help="Target framework format.",
+)
+@click.option(
+    "--input",
+    "input_file",
+    required=True,
+    type=click.Path(exists=True, dir_okay=False),
+    help="Path to the source framework JSON file.",
+)
+@click.option(
+    "--output",
+    "output_file",
+    required=True,
+    type=click.Path(dir_okay=False),
+    help="Path to write the target framework JSON file.",
+)
+def portable_convert(from_fmt: str, to_fmt: str, input_file: str, output_file: str) -> None:
+    """Convert a session between two framework-native formats via USF.
+
+    The conversion pipeline is: source -> USF -> target.
+
+    Examples::
+
+        agent-session-linker portable convert --from langchain --to openai \\
+            --input lc_memory.json --output openai_thread.json
+
+        agent-session-linker portable convert --from crewai --to langchain \\
+            --input crewai_ctx.json --output lc_memory.json
+    """
+    import json as _json
+    from pathlib import Path
+    from agent_session_linker.portable.importers import (
+        LangChainImporter,
+        CrewAIImporter,
+        OpenAIImporter,
+    )
+    from agent_session_linker.portable.exporters import (
+        LangChainExporter,
+        CrewAIExporter,
+        OpenAIExporter,
+    )
+
+    importer_map = {
+        "langchain": LangChainImporter(),
+        "crewai": CrewAIImporter(),
+        "openai": OpenAIImporter(),
+    }
+    exporter_map = {
+        "langchain": LangChainExporter(),
+        "crewai": CrewAIExporter(),
+        "openai": OpenAIExporter(),
+    }
+
+    try:
+        raw_text = Path(input_file).read_text(encoding="utf-8")
+        data: dict[str, object] = _json.loads(raw_text)
+    except (ValueError, OSError) as exc:
+        console.print(f"[red]Failed to read input:[/red] {exc}")
+        sys.exit(1)
+
+    importer = importer_map[from_fmt.lower()]
+    exporter = exporter_map[to_fmt.lower()]
+
+    try:
+        session = importer.import_session(data)  # type: ignore[arg-type]
+    except (ValueError, KeyError) as exc:
+        console.print(f"[red]Import failed:[/red] {exc}")
+        sys.exit(1)
+
+    result = exporter.export(session)
+
+    output_path = Path(output_file)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(_json.dumps(result, indent=2, default=str), encoding="utf-8")
+    console.print(f"[green]Converted ({from_fmt} -> {to_fmt}):[/green] {output_file}")
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
