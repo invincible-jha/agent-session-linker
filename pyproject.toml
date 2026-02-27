@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "agent-session-linker"
-version = "0.1.0"
+version = "0.2.0"
 description = "Cross-session context persistence and resumption"
 readme = "README.md"
 requires-python = ">=3.10"
