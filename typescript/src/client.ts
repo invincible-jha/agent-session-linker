@@ -300,13 +300,3 @@ export function createAgentSessionLinkerClient(
   };
 }
 
-/** Re-export config type for convenience. */
-export type {
-  CreateSessionRequest,
-  ResumeSessionRequest,
-  SaveContextRequest,
-  SessionState,
-  SessionSummary,
-  SessionStats,
-  ResumptionToken,
-};
