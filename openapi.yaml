@@ -1,0 +1,735 @@
+openapi: "3.1.0"
+
+info:
+  title: Agent Session Linker API
+  version: "0.2.0"
+  description: |
+    HTTP API for the agent-session-linker server. Provides endpoints for
+    creating, persisting, retrieving, listing, and deleting agent sessions.
+    Sessions capture conversation segments, tracked entities, task states,
+    and tool invocations across agent turns.
+
+    Sessions support cross-session continuity via parent_session_id links and
+    are serialized with SHA-256 checksum validation to detect tampering.
+  license:
+    name: Apache 2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
+
+servers:
+  - url: http://localhost:8083
+    description: Local development server
+
+tags:
+  - name: sessions
+    description: Create, retrieve, update, and delete agent sessions
+  - name: segments
+    description: Append context segments to a session
+  - name: tasks
+    description: Manage tasks within a session
+  - name: health
+    description: Server health check
+
+paths:
+  /sessions:
+    post:
+      tags: [sessions]
+      operationId: createSession
+      summary: Create a new agent session
+      description: |
+        Creates a new agent session and persists it to the storage backend.
+        Optionally links to a parent session for cross-session continuity.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateSessionRequest"
+            example:
+              agent_id: "agent-abc"
+              parent_session_id: null
+              preferences:
+                output_format: "markdown"
+                language: "en"
+      responses:
+        "201":
+          description: Session created successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionResponse"
+              example:
+                session_id: "550e8400-e29b-41d4-a716-446655440000"
+                agent_id: "agent-abc"
+                schema_version: "1.0"
+                segments: []
+                entities: []
+                tasks: []
+                tools_used: []
+                preferences:
+                  output_format: "markdown"
+                summary: ""
+                parent_session_id: null
+                total_cost_usd: 0.0
+                created_at: "2026-02-27T12:00:00+00:00"
+                updated_at: "2026-02-27T12:00:00+00:00"
+                checksum: "abc123..."
+        "422":
+          description: Validation error in request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+    get:
+      tags: [sessions]
+      operationId: listSessions
+      summary: List all sessions
+      description: |
+        Returns session IDs for all sessions in the storage backend.
+        Optionally filtered to sessions belonging to a specific agent.
+      parameters:
+        - name: agent_id
+          in: query
+          required: false
+          description: Filter sessions by agent identifier
+          schema:
+            type: string
+          example: "agent-abc"
+      responses:
+        "200":
+          description: List of session IDs
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionListResponse"
+              example:
+                session_ids:
+                  - "550e8400-e29b-41d4-a716-446655440000"
+                  - "660f9500-f30c-52e5-b827-557766551111"
+                total: 2
+
+  /sessions/{session_id}:
+    get:
+      tags: [sessions]
+      operationId: getSession
+      summary: Retrieve a specific session
+      description: Returns the full session record for the given session_id.
+      parameters:
+        - name: session_id
+          in: path
+          required: true
+          description: UUID of the session to retrieve
+          schema:
+            type: string
+            format: uuid
+          example: "550e8400-e29b-41d4-a716-446655440000"
+      responses:
+        "200":
+          description: Session found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionResponse"
+        "404":
+          description: Session not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: "Not found"
+                detail: "Session '550e8400-e29b-41d4-a716-446655440000' not found."
+
+    delete:
+      tags: [sessions]
+      operationId: deleteSession
+      summary: Delete a session
+      description: Permanently removes the session from the storage backend.
+      parameters:
+        - name: session_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          example: "550e8400-e29b-41d4-a716-446655440000"
+      responses:
+        "200":
+          description: Session deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  session_id:
+                    type: string
+                  deleted:
+                    type: boolean
+        "404":
+          description: Session not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /sessions/{session_id}/continue:
+    post:
+      tags: [sessions]
+      operationId: continueSession
+      summary: Create a continuation session
+      description: |
+        Loads the parent session and creates a new child session linked to it.
+        The child inherits agent_id, preferences, active tasks, and entities
+        from the parent. The new session is persisted and returned.
+      parameters:
+        - name: session_id
+          in: path
+          required: true
+          description: UUID of the parent session to continue from
+          schema:
+            type: string
+            format: uuid
+          example: "550e8400-e29b-41d4-a716-446655440000"
+      responses:
+        "201":
+          description: Continuation session created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionResponse"
+        "404":
+          description: Parent session not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /sessions/{session_id}/segments:
+    post:
+      tags: [segments]
+      operationId: addSegment
+      summary: Append a context segment to a session
+      description: |
+        Adds a new conversation context segment to the session and persists
+        the updated session.
+      parameters:
+        - name: session_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          example: "550e8400-e29b-41d4-a716-446655440000"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AddSegmentRequest"
+            example:
+              role: "user"
+              content: "Please summarize the quarterly report."
+              token_count: 8
+              segment_type: "conversation"
+              metadata:
+                source: "chat_ui"
+      responses:
+        "201":
+          description: Segment added
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContextSegment"
+        "404":
+          description: Session not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /sessions/{session_id}/tasks:
+    post:
+      tags: [tasks]
+      operationId: addTask
+      summary: Add a task to a session
+      description: Creates and appends a new task to the session, then persists the update.
+      parameters:
+        - name: session_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          example: "550e8400-e29b-41d4-a716-446655440000"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AddTaskRequest"
+            example:
+              title: "Summarize Q3 Report"
+              description: "Generate a 3-paragraph summary of the Q3 financial report"
+              priority: 3
+              tags: ["finance", "reporting"]
+      responses:
+        "201":
+          description: Task added
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskState"
+        "404":
+          description: Session not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /sessions/{session_id}/tasks/{task_id}:
+    patch:
+      tags: [tasks]
+      operationId: updateTask
+      summary: Update a task within a session
+      description: Updates the status, notes, or priority of an existing task.
+      parameters:
+        - name: session_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: task_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateTaskRequest"
+            example:
+              status: "completed"
+              notes: "Summary delivered at 14:32 UTC"
+      responses:
+        "200":
+          description: Task updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskState"
+        "404":
+          description: Session or task not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /stats:
+    get:
+      tags: [sessions]
+      operationId: getStats
+      summary: Get aggregate session statistics
+      description: Returns statistics aggregated across all sessions in the storage backend.
+      responses:
+        "200":
+          description: Aggregate statistics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatsResponse"
+              example:
+                total_sessions: 15
+                total_segments: 342
+                total_tokens: 128400
+                total_tasks: 47
+                total_entities: 83
+                total_cost_usd: 3.14
+                agents: ["agent-abc", "agent-def"]
+
+  /health:
+    get:
+      tags: [health]
+      operationId: getHealth
+      summary: Health check
+      description: Returns server status and session count.
+      responses:
+        "200":
+          description: Server is healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+              example:
+                status: "ok"
+                service: "agent-session-linker"
+                version: "0.1.0"
+                session_count: 15
+
+components:
+  schemas:
+    CreateSessionRequest:
+      type: object
+      description: Request body for creating a new session.
+      properties:
+        agent_id:
+          type: string
+          default: "default"
+          description: Agent identifier for this session
+        parent_session_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Optional parent session for linked continuity
+        preferences:
+          type: object
+          additionalProperties:
+            type: string
+          default: {}
+          description: Initial preference key-value pairs
+
+    ContextSegment:
+      type: object
+      description: A discrete unit of context from a conversation turn.
+      required: [segment_id, role, content]
+      properties:
+        segment_id:
+          type: string
+          format: uuid
+        role:
+          type: string
+          description: Message role
+          enum: [user, assistant, system, tool]
+        content:
+          type: string
+        token_count:
+          type: integer
+          default: 0
+        segment_type:
+          type: string
+          default: "conversation"
+          enum: [conversation, reasoning, code, plan, output, metadata]
+        timestamp:
+          type: string
+          format: date-time
+        turn_index:
+          type: integer
+          default: 0
+          description: Zero-based index of the conversation turn
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
+          default: {}
+
+    EntityReference:
+      type: object
+      description: A cross-session pointer to a tracked domain entity.
+      required: [entity_id, canonical_name]
+      properties:
+        entity_id:
+          type: string
+          format: uuid
+        canonical_name:
+          type: string
+        entity_type:
+          type: string
+          default: "concept"
+          enum: [person, project, file, concept, tool, organisation]
+        aliases:
+          type: array
+          items:
+            type: string
+          default: []
+        attributes:
+          type: object
+          additionalProperties:
+            type: string
+          default: {}
+        first_seen_session:
+          type: string
+          default: ""
+        last_seen_session:
+          type: string
+          default: ""
+        confidence:
+          type: number
+          format: double
+          default: 1.0
+          minimum: 0.0
+          maximum: 1.0
+
+    TaskState:
+      type: object
+      description: A tracked task with its current lifecycle status.
+      required: [task_id, title]
+      properties:
+        task_id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        description:
+          type: string
+          default: ""
+        status:
+          type: string
+          default: "pending"
+          enum: [pending, in_progress, completed, failed, cancelled]
+        priority:
+          type: integer
+          default: 5
+          minimum: 1
+          maximum: 10
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        parent_task_id:
+          type: string
+          format: uuid
+          nullable: true
+        tags:
+          type: array
+          items:
+            type: string
+          default: []
+        notes:
+          type: string
+          default: ""
+
+    ToolContext:
+      type: object
+      description: A record of a single tool invocation.
+      required: [invocation_id, tool_name]
+      properties:
+        invocation_id:
+          type: string
+          format: uuid
+        tool_name:
+          type: string
+        input_summary:
+          type: string
+          default: ""
+        output_summary:
+          type: string
+          default: ""
+        duration_ms:
+          type: number
+          format: double
+          default: 0.0
+        success:
+          type: boolean
+          default: true
+        error_message:
+          type: string
+          default: ""
+        timestamp:
+          type: string
+          format: date-time
+        token_cost:
+          type: integer
+          default: 0
+
+    SessionResponse:
+      type: object
+      description: Full session snapshot.
+      required:
+        - session_id
+        - agent_id
+        - schema_version
+        - created_at
+        - updated_at
+      properties:
+        session_id:
+          type: string
+          format: uuid
+        agent_id:
+          type: string
+        schema_version:
+          type: string
+          default: "1.0"
+        segments:
+          type: array
+          items:
+            $ref: "#/components/schemas/ContextSegment"
+          default: []
+        entities:
+          type: array
+          items:
+            $ref: "#/components/schemas/EntityReference"
+          default: []
+        tasks:
+          type: array
+          items:
+            $ref: "#/components/schemas/TaskState"
+          default: []
+        tools_used:
+          type: array
+          items:
+            $ref: "#/components/schemas/ToolContext"
+          default: []
+        preferences:
+          type: object
+          additionalProperties:
+            type: string
+          default: {}
+        summary:
+          type: string
+          default: ""
+        parent_session_id:
+          type: string
+          format: uuid
+          nullable: true
+        total_cost_usd:
+          type: number
+          format: double
+          default: 0.0
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        checksum:
+          type: string
+          description: SHA-256 hex digest for tamper detection
+
+    SessionListResponse:
+      type: object
+      required: [session_ids, total]
+      properties:
+        session_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+        total:
+          type: integer
+
+    AddSegmentRequest:
+      type: object
+      required: [role, content]
+      properties:
+        role:
+          type: string
+          enum: [user, assistant, system, tool]
+        content:
+          type: string
+        token_count:
+          type: integer
+          default: 0
+        segment_type:
+          type: string
+          default: "conversation"
+          enum: [conversation, reasoning, code, plan, output, metadata]
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
+          default: {}
+
+    AddTaskRequest:
+      type: object
+      required: [title]
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+          default: ""
+        priority:
+          type: integer
+          default: 5
+          minimum: 1
+          maximum: 10
+        tags:
+          type: array
+          items:
+            type: string
+          default: []
+        parent_task_id:
+          type: string
+          format: uuid
+          nullable: true
+
+    UpdateTaskRequest:
+      type: object
+      properties:
+        status:
+          type: string
+          nullable: true
+          enum: [pending, in_progress, completed, failed, cancelled]
+        notes:
+          type: string
+          nullable: true
+          description: Appended to existing notes with a newline separator
+        priority:
+          type: integer
+          nullable: true
+          minimum: 1
+          maximum: 10
+
+    StatsResponse:
+      type: object
+      description: Aggregate statistics across all sessions.
+      required: [total_sessions]
+      properties:
+        total_sessions:
+          type: integer
+        total_segments:
+          type: integer
+        total_tokens:
+          type: integer
+        total_tasks:
+          type: integer
+        total_entities:
+          type: integer
+        total_cost_usd:
+          type: number
+          format: double
+        agents:
+          type: array
+          items:
+            type: string
+          description: Sorted list of unique agent IDs
+
+    HealthResponse:
+      type: object
+      description: Server health information.
+      required: [status, service, version]
+      properties:
+        status:
+          type: string
+          default: "ok"
+        service:
+          type: string
+          default: "agent-session-linker"
+        version:
+          type: string
+          default: "0.1.0"
+        session_count:
+          type: integer
+          description: Number of sessions currently in the storage backend
+
+    ErrorResponse:
+      type: object
+      description: Standard error response body.
+      required: [error]
+      properties:
+        error:
+          type: string
+        detail:
+          type: string
+          default: ""
