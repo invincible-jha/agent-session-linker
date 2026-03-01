@@ -4,6 +4,13 @@ Each exporter implements the :class:`SessionExporter` Protocol and produces a
 ``dict`` that can be passed directly to the target framework's session or
 memory APIs.
 
+All export methods accept an optional *encryptor* keyword argument of type
+:class:`~agent_session_linker.portable.encryption.SessionEncryptor`.  When
+provided, the JSON representation of the session is encrypted before being
+embedded in the output dict under the key ``"_encrypted"``.  Callers that do
+not need encryption simply omit the argument; existing call sites are fully
+backward-compatible.
+
 Classes
 -------
 SessionExporter
@@ -20,9 +27,61 @@ OpenAIExporter
 """
 from __future__ import annotations
 
-from typing import Protocol
+import base64
+import json
+from typing import TYPE_CHECKING, Protocol
 
 from agent_session_linker.portable.usf import UniversalSession, USFMessage, USFTaskState
+
+if TYPE_CHECKING:
+    from agent_session_linker.portable.encryption import SessionEncryptor
+
+
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
+
+
+def _apply_encryption(
+    output: dict[str, object],
+    session: UniversalSession,
+    encryptor: SessionEncryptor | None,
+) -> dict[str, object]:
+    """Optionally encrypt the session JSON and embed it into *output*.
+
+    When *encryptor* is ``None`` the original *output* dict is returned
+    unchanged.  When *encryptor* is provided the full session is encrypted
+    and the result is returned as::
+
+        {
+            "_encrypted": "<base64-encoded wire bytes>",
+            "_encryption_version": "1.0",
+        }
+
+    Parameters
+    ----------
+    output:
+        The plain export dict produced by an exporter's ``export`` method.
+    session:
+        The source :class:`UniversalSession` (used to obtain the JSON payload
+        for encryption).
+    encryptor:
+        An optional :class:`SessionEncryptor` instance.
+
+    Returns
+    -------
+    dict[str, object]
+        Either *output* unchanged, or an encrypted envelope dict.
+    """
+    if encryptor is None:
+        return output
+    payload: dict[str, object] = json.loads(session.to_json())
+    encrypted = encryptor.encrypt(payload)
+    wire_bytes = encrypted.to_bytes()
+    return {
+        "_encrypted": base64.b64encode(wire_bytes).decode("ascii"),
+        "_encryption_version": encrypted.version,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -37,18 +96,28 @@ class SessionExporter(Protocol):
     ``dict`` that is ready to be consumed by the target framework.
     """
 
-    def export(self, session: UniversalSession) -> dict[str, object]:
+    def export(
+        self,
+        session: UniversalSession,
+        *,
+        encryptor: SessionEncryptor | None = None,
+    ) -> dict[str, object]:
         """Convert *session* to the target framework's native dict format.
 
         Parameters
         ----------
         session:
             A :class:`UniversalSession` to export.
+        encryptor:
+            Optional :class:`~agent_session_linker.portable.encryption.SessionEncryptor`.
+            When provided the output is an encrypted envelope instead of a
+            plain framework dict.
 
         Returns
         -------
         dict[str, object]
-            Framework-native representation of the session.
+            Framework-native representation of the session, or an encrypted
+            envelope dict when *encryptor* is supplied.
         """
         ...  # pragma: no cover
 
@@ -100,26 +169,35 @@ class LangChainExporter:
     ``memory_variables`` is populated from ``session.working_memory``.
     """
 
-    def export(self, session: UniversalSession) -> dict[str, object]:
+    def export(
+        self,
+        session: UniversalSession,
+        *,
+        encryptor: SessionEncryptor | None = None,
+    ) -> dict[str, object]:
         """Convert *session* to LangChain memory format.
 
         Parameters
         ----------
         session:
             Source :class:`UniversalSession`.
+        encryptor:
+            Optional :class:`~agent_session_linker.portable.encryption.SessionEncryptor`.
+            When supplied the return value is an encrypted envelope dict.
 
         Returns
         -------
         dict[str, object]
-            LangChain-compatible memory dict.
+            LangChain-compatible memory dict, or an encrypted envelope.
         """
         messages: list[dict[str, object]] = [
             self._convert_message(msg) for msg in session.messages
         ]
-        return {
+        output: dict[str, object] = {
             "messages": messages,
             "memory_variables": dict(session.working_memory),
         }
+        return _apply_encryption(output, session, encryptor)
 
     def _convert_message(self, msg: USFMessage) -> dict[str, object]:
         return {
@@ -159,18 +237,26 @@ class CrewAIExporter:
         }
     """
 
-    def export(self, session: UniversalSession) -> dict[str, object]:
+    def export(
+        self,
+        session: UniversalSession,
+        *,
+        encryptor: SessionEncryptor | None = None,
+    ) -> dict[str, object]:
         """Convert *session* to CrewAI context format.
 
         Parameters
         ----------
         session:
             Source :class:`UniversalSession`.
+        encryptor:
+            Optional :class:`~agent_session_linker.portable.encryption.SessionEncryptor`.
+            When supplied the return value is an encrypted envelope dict.
 
         Returns
         -------
         dict[str, object]
-            CrewAI-compatible context dict.
+            CrewAI-compatible context dict, or an encrypted envelope.
         """
         context: dict[str, object] = {
             "session_id": session.session_id,
@@ -190,10 +276,11 @@ class CrewAIExporter:
         task_results: list[dict[str, object]] = [
             self._convert_task(task) for task in session.task_state
         ]
-        return {
+        output: dict[str, object] = {
             "context": context,
             "task_results": task_results,
         }
+        return _apply_encryption(output, session, encryptor)
 
     def _convert_message(self, msg: USFMessage) -> dict[str, object]:
         return {
@@ -237,26 +324,35 @@ class OpenAIExporter:
     Assistants API accepts them in message-level metadata when needed.
     """
 
-    def export(self, session: UniversalSession) -> dict[str, object]:
+    def export(
+        self,
+        session: UniversalSession,
+        *,
+        encryptor: SessionEncryptor | None = None,
+    ) -> dict[str, object]:
         """Convert *session* to OpenAI thread format.
 
         Parameters
         ----------
         session:
             Source :class:`UniversalSession`.
+        encryptor:
+            Optional :class:`~agent_session_linker.portable.encryption.SessionEncryptor`.
+            When supplied the return value is an encrypted envelope dict.
 
         Returns
         -------
         dict[str, object]
-            OpenAI-compatible thread dict.
+            OpenAI-compatible thread dict, or an encrypted envelope.
         """
         messages: list[dict[str, object]] = [
             self._convert_message(msg) for msg in session.messages
         ]
-        return {
+        output: dict[str, object] = {
             "thread_id": session.session_id,
             "messages": messages,
         }
+        return _apply_encryption(output, session, encryptor)
 
     def _convert_message(self, msg: USFMessage) -> dict[str, object]:
         return {

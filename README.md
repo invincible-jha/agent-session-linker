@@ -21,6 +21,14 @@ Part of the [AumOS](https://github.com/aumos-ai) open-source agent infrastructur
 - Session middleware with automatic checkpoint creation and context-window management that prevents unbounded context growth
 - `SessionLinker` chains related sessions by shared entities, enabling multi-session reasoning across conversations that span days or weeks
 
+## Current Limitations
+
+> **Transparency note**: We list known limitations to help you evaluate fit.
+
+- **Security**: No encryption at rest for exported sessions. No file locking for concurrent access.
+- **Async**: Synchronous API only.
+- **Format**: USF 1.0 — no schema migration tooling yet.
+
 ## Quick Start
 
 Install from PyPI:

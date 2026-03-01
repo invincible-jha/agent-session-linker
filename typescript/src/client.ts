@@ -1,8 +1,12 @@
 /**
  * HTTP client for the agent-session-linker session management API.
  *
- * Uses the Fetch API (available natively in Node 18+, browsers, and Deno).
- * No external dependencies required.
+ * Delegates all HTTP transport to `@aumos/sdk-core` which provides
+ * automatic retry with exponential back-off, timeout management via
+ * `AbortSignal.timeout`, interceptor support, and a typed error hierarchy.
+ *
+ * The public-facing `ApiResult<T>` envelope is preserved for full
+ * backward compatibility with existing callers.
  *
  * @example
  * ```ts
@@ -17,8 +21,16 @@
  * ```
  */
 
+import {
+  createHttpClient,
+  HttpError,
+  NetworkError,
+  TimeoutError,
+  AumosError,
+  type HttpClient,
+} from "@aumos/sdk-core";
+
 import type {
-  ApiError,
   ApiResult,
   CreateSessionRequest,
   ResumptionToken,
@@ -44,55 +56,51 @@ export interface AgentSessionLinkerClientConfig {
 }
 
 // ---------------------------------------------------------------------------
-// Internal helpers
+// Internal adapter
 // ---------------------------------------------------------------------------
 
-async function fetchJson<T>(
-  url: string,
-  init: RequestInit,
-  timeoutMs: number,
+async function callApi<T>(
+  operation: () => Promise<{ readonly data: T; readonly status: number }>,
 ): Promise<ApiResult<T>> {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-
   try {
-    const response = await fetch(url, { ...init, signal: controller.signal });
-    clearTimeout(timeoutId);
-
-    const body = await response.json() as unknown;
-
-    if (!response.ok) {
-      const errorBody = body as Partial<ApiError>;
+    const response = await operation();
+    return { ok: true, data: response.data };
+  } catch (error: unknown) {
+    if (error instanceof HttpError) {
       return {
         ok: false,
-        error: {
-          error: errorBody.error ?? "Unknown error",
-          detail: errorBody.detail ?? "",
-        },
-        status: response.status,
+        error: { error: error.message, detail: String(error.body ?? "") },
+        status: error.statusCode,
       };
     }
-
-    return { ok: true, data: body as T };
-  } catch (err: unknown) {
-    clearTimeout(timeoutId);
-    const message = err instanceof Error ? err.message : String(err);
+    if (error instanceof TimeoutError) {
+      return {
+        ok: false,
+        error: { error: "Request timed out", detail: error.message },
+        status: 0,
+      };
+    }
+    if (error instanceof NetworkError) {
+      return {
+        ok: false,
+        error: { error: "Network error", detail: error.message },
+        status: 0,
+      };
+    }
+    if (error instanceof AumosError) {
+      return {
+        ok: false,
+        error: { error: error.code, detail: error.message },
+        status: error.statusCode ?? 0,
+      };
+    }
+    const message = error instanceof Error ? error.message : String(error);
     return {
       ok: false,
-      error: { error: "Network error", detail: message },
+      error: { error: "Unexpected error", detail: message },
       status: 0,
     };
   }
-}
-
-function buildHeaders(
-  extraHeaders: Readonly<Record<string, string>> | undefined,
-): Record<string, string> {
-  return {
-    "Content-Type": "application/json",
-    Accept: "application/json",
-    ...extraHeaders,
-  };
 }
 
 // ---------------------------------------------------------------------------
@@ -185,118 +193,77 @@ export interface AgentSessionLinkerClient {
 export function createAgentSessionLinkerClient(
   config: AgentSessionLinkerClientConfig,
 ): AgentSessionLinkerClient {
-  const { baseUrl, timeoutMs = 30_000, headers: extraHeaders } = config;
-  const baseHeaders = buildHeaders(extraHeaders);
+  const http: HttpClient = createHttpClient({
+    baseUrl: config.baseUrl,
+    timeout: config.timeoutMs ?? 30_000,
+    defaultHeaders: config.headers,
+  });
 
   return {
-    async createSession(
-      request?: CreateSessionRequest,
-    ): Promise<ApiResult<SessionState>> {
-      return fetchJson<SessionState>(
-        `${baseUrl}/sessions`,
-        {
-          method: "POST",
-          headers: baseHeaders,
-          body: JSON.stringify(request ?? {}),
-        },
-        timeoutMs,
+    createSession(request?: CreateSessionRequest): Promise<ApiResult<SessionState>> {
+      return callApi(() => http.post<SessionState>("/sessions", request ?? {}));
+    },
+
+    getSession(sessionId: string): Promise<ApiResult<SessionState>> {
+      return callApi(() =>
+        http.get<SessionState>(`/sessions/${encodeURIComponent(sessionId)}`),
       );
     },
 
-    async getSession(sessionId: string): Promise<ApiResult<SessionState>> {
-      return fetchJson<SessionState>(
-        `${baseUrl}/sessions/${encodeURIComponent(sessionId)}`,
-        { method: "GET", headers: baseHeaders },
-        timeoutMs,
+    resumeSession(request: ResumeSessionRequest): Promise<ApiResult<SessionState>> {
+      return callApi(() => http.post<SessionState>("/sessions/resume", request));
+    },
+
+    saveContext(request: SaveContextRequest): Promise<ApiResult<SessionState>> {
+      return callApi(() =>
+        http.patch<SessionState>(
+          `/sessions/${encodeURIComponent(request.session_id)}/context`,
+          request.context,
+        ),
       );
     },
 
-    async resumeSession(
-      request: ResumeSessionRequest,
-    ): Promise<ApiResult<SessionState>> {
-      return fetchJson<SessionState>(
-        `${baseUrl}/sessions/resume`,
-        {
-          method: "POST",
-          headers: baseHeaders,
-          body: JSON.stringify(request),
-        },
-        timeoutMs,
-      );
-    },
-
-    async saveContext(
-      request: SaveContextRequest,
-    ): Promise<ApiResult<SessionState>> {
-      return fetchJson<SessionState>(
-        `${baseUrl}/sessions/${encodeURIComponent(request.session_id)}/context`,
-        {
-          method: "PATCH",
-          headers: baseHeaders,
-          body: JSON.stringify(request.context),
-        },
-        timeoutMs,
-      );
-    },
-
-    async listSessions(options?: {
+    listSessions(options?: {
       readonly agentId?: string;
       readonly limit?: number;
     }): Promise<ApiResult<readonly SessionSummary[]>> {
-      const params = new URLSearchParams();
-      if (options?.agentId !== undefined) {
-        params.set("agent_id", options.agentId);
-      }
-      if (options?.limit !== undefined) {
-        params.set("limit", String(options.limit));
-      }
-      const queryString = params.toString();
-      const url = queryString
-        ? `${baseUrl}/sessions?${queryString}`
-        : `${baseUrl}/sessions`;
-      return fetchJson<readonly SessionSummary[]>(
-        url,
-        { method: "GET", headers: baseHeaders },
-        timeoutMs,
+      const queryParams: Record<string, string> = {};
+      if (options?.agentId !== undefined) queryParams["agent_id"] = options.agentId;
+      if (options?.limit !== undefined) queryParams["limit"] = String(options.limit);
+      return callApi(() =>
+        http.get<readonly SessionSummary[]>("/sessions", { queryParams }),
       );
     },
 
-    async deleteSession(
+    deleteSession(
       sessionId: string,
     ): Promise<ApiResult<Readonly<Record<string, never>>>> {
-      return fetchJson<Readonly<Record<string, never>>>(
-        `${baseUrl}/sessions/${encodeURIComponent(sessionId)}`,
-        { method: "DELETE", headers: baseHeaders },
-        timeoutMs,
+      return callApi(() =>
+        http.delete<Readonly<Record<string, never>>>(
+          `/sessions/${encodeURIComponent(sessionId)}`,
+        ),
       );
     },
 
-    async getResumptionToken(
+    getResumptionToken(
       sessionId: string,
       options?: { readonly ttlSeconds?: number },
     ): Promise<ApiResult<ResumptionToken>> {
-      const params = new URLSearchParams();
+      const queryParams: Record<string, string> = {};
       if (options?.ttlSeconds !== undefined) {
-        params.set("ttl_seconds", String(options.ttlSeconds));
+        queryParams["ttl_seconds"] = String(options.ttlSeconds);
       }
-      const queryString = params.toString();
-      const url = queryString
-        ? `${baseUrl}/sessions/${encodeURIComponent(sessionId)}/token?${queryString}`
-        : `${baseUrl}/sessions/${encodeURIComponent(sessionId)}/token`;
-      return fetchJson<ResumptionToken>(
-        url,
-        { method: "POST", headers: baseHeaders, body: JSON.stringify({}) },
-        timeoutMs,
+      return callApi(() =>
+        http.post<ResumptionToken>(
+          `/sessions/${encodeURIComponent(sessionId)}/token`,
+          {},
+          { queryParams },
+        ),
       );
     },
 
-    async getStats(): Promise<ApiResult<SessionStats>> {
-      return fetchJson<SessionStats>(
-        `${baseUrl}/sessions/stats`,
-        { method: "GET", headers: baseHeaders },
-        timeoutMs,
-      );
+    getStats(): Promise<ApiResult<SessionStats>> {
+      return callApi(() => http.get<SessionStats>("/sessions/stats"));
     },
   };
 }
-

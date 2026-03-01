@@ -73,6 +73,11 @@ from agent_session_linker.portable.importers import (
     OpenAIImporter,
 )
 
+# Portable extras — encryption, locking, versioning
+from agent_session_linker.portable.encryption import EncryptedPayload, SessionEncryptor
+from agent_session_linker.portable.locking import FileLock
+from agent_session_linker.portable.versioning import SchemaVersion, SchemaMigrator
+
 __version__: str = "0.1.0"
 
 from agent_session_linker.convenience import Session
@@ -132,4 +137,10 @@ __all__ = [
     "LangChainImporter",
     "CrewAIImporter",
     "OpenAIImporter",
+    # Encryption / locking / versioning
+    "EncryptedPayload",
+    "SessionEncryptor",
+    "FileLock",
+    "SchemaVersion",
+    "SchemaMigrator",
 ]
